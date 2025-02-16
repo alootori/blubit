@@ -55,18 +55,18 @@ def find_max_similarity(sentences):
     return max_similarity, best_sentence, best_query
 
 # Apply sentence processing & similarity computation in batches
-df["sentences"] = df["claim_description"].apply(split_text)
+df["sentences"] = df["desc"].apply(split_text)
 df[["max_similarity", "best_sentence", "best_query"]] = df["sentences"].apply(lambda x: find_max_similarity(x) if x else (0, "", ""))
 
 # Suggest an optimal threshold based on 90th percentile
 threshold = max(0.85, df["max_similarity"].quantile(0.90))
 print(f"🔹 Suggested Optimal Threshold: {threshold:.2f}")
 
-# Apply threshold & flag claims
+# Apply threshold & flag 
 df["flagged"] = df["max_similarity"] >= threshold
 
 
 
-# Display flagged claims
+# Display flagged 
 import ace_tools as tools
 tools.display_dataframe_to_user(name="Flagged", dataframe=df[df["flagged"]])
