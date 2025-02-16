@@ -1,32 +1,38 @@
 import pandas as pd
 import re
-import matplotlib.pyplot as plt
-import seaborn as sns
+import torch
 from sentence_transformers import SentenceTransformer, util
 
-# Load Sentence Transformer Model
-model = SentenceTransformer("intfloat/e5-large")  # Best for retrieval & similarity
+from tqdm import tqdm
 
-# Expanded query set to include different synonyms
+
+# Load Sentence Transformer Model (Optimized for GPU)
+device = "cuda" if torch.cuda.is_available() else "cpu"
+print(f"Using device: {device}")
+
+model = SentenceTransformer("intfloat/e5-large").to(device)  # Best for retrieval & similarity
+
+# Define multiple reference queries (to handle different phrasings)
 reference_queries = [
-    "C m.",
-
+    ""
 ]
 
-# Encode all reference queries
-query_embeddings = {query: model.encode(query) for query in reference_queries}
+# Encode all reference queries (Move to GPU for faster computation)
+query_embeddings = {query: model.encode(query, convert_to_tensor=True, device=device) for query in reference_queries}
+
+# Load  dataset into a Pandas DataFrame
+df = pd.read_csv("data.csv")
 
 # Function to split text into sentences
 def split_text(text):
-    if pd.isna(text): return []  # Handle missing values
+    if pd.isna(text): return []
 
-    # First split by newline (\n), then split each part by period (.)
+    # First split by newline (\n), then by period (.)
     sentences = []
     for part in text.split("\n"):
         sentences.extend(re.split(r'\.\s*', part))  # Split by period with optional spaces
 
-    # Clean sentences
-    sentences = [s.strip() for s in sentences if len(s.strip()) > 5]  # Remove short/empty fragments
+    sentences = [s.strip() for s in sentences if len(s.strip()) > 5]  # Remove empty/short fragments
     return sentences
 
 # Function to find max similarity & best matching sentence
@@ -36,46 +42,31 @@ def find_max_similarity(sentences):
     best_query = ""
 
     for sentence in sentences:
-        sentence_embedding = model.encode(sentence)
+        sentence_embedding = model.encode(sentence, convert_to_tensor=True, device=device)
 
         for query, query_embedding in query_embeddings.items():
-            similarity_score = util.cos_sim(query_embedding, sentence_embedding)[0][0].item()
+            similarity_score = util.cos_sim(query_embedding, sentence_embedding).item()
 
             if similarity_score > max_similarity:
                 max_similarity = similarity_score
                 best_sentence = sentence
-                best_query = query  # Store the best-matching reference query
+                best_query = query  # Store best-matching reference query
 
     return max_similarity, best_sentence, best_query
 
-# Load claims dataset
-df = pd.read_csv("cdata.csv")
-
-# Process 
-df["sentences"] = df["escription"].apply(split_text)
+# Apply sentence processing & similarity computation in batches
+df["sentences"] = df["claim_description"].apply(split_text)
 df[["max_similarity", "best_sentence", "best_query"]] = df["sentences"].apply(lambda x: find_max_similarity(x) if x else (0, "", ""))
 
-# Visualize Similarity Distribution
-plt.figure(figsize=(10,5))
-sns.histplot(df["max_similarity"], bins=30, kde=True, color="blue")
-plt.axvline(x=0.85, color="red", linestyle="--", label="85% Threshold")
-plt.xlabel("Max Similarity Score")
-plt.ylabel("Number ")
-plt.title("Similarity Score Distribution")
-plt.legend()
-plt.show()
+# Suggest an optimal threshold based on 90th percentile
+threshold = max(0.85, df["max_similarity"].quantile(0.90))
+print(f"🔹 Suggested Optimal Threshold: {threshold:.2f}")
 
-# Suggest an optimal threshold based on the distribution
-suggested_threshold = df["max_similarity"].quantile(0.90)  # 90th percentile
-print(f"🔹 Suggested Optimal Threshold: {suggested_threshold:.2f}")
-
-# Apply new threshold
-threshold = max(0.85, suggested_threshold)  # Ensure it's not lower than 0.85
+# Apply threshold & flag claims
 df["flagged"] = df["max_similarity"] >= threshold
 
-# Save flagged 
-df.to_csv("flagged_s.csv", index=False)
 
-# Display flagged 
+
+# Display flagged claims
 import ace_tools as tools
-tools.display_dataframe_to_user(name="Flagged ", dataframe=df[df["flagged"]])
+tools.display_dataframe_to_user(name="Flagged", dataframe=df[df["flagged"]])
