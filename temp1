@@ -1,93 +1,44 @@
 import torch
-from transformers import AutoTokenizer, AutoModel
-import pandas as pd
-import re
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
-# ✅ Define Model Path (Ensure the folder exists)
-model_path = "e5-large-v2"  # Adjust this if your model is stored elsewhere
+# Define Model Path (Ensure the downloaded files are inside this folder)
+model_path = "phi-1.5"  # Adjust if stored elsewhere
 
-# ✅ Load Tokenizer
+# Load Tokenizer
 tokenizer = AutoTokenizer.from_pretrained(model_path)
 
-# ✅ Load Model (Ensure correct format)
-model = AutoModel.from_pretrained(model_path, torch_dtype=torch.float16, device_map="auto")
+# Load Model with `safetensors`
+model = AutoModelForCausalLM.from_pretrained(model_path, torch_dtype=torch.float16, device_map="auto")
 
-# ✅ Move Model to GPU if available
+# Move Model to GPU if available
 device = "cuda" if torch.cuda.is_available() else "cpu"
 model.to(device)
-print(f"✅ Model successfully loaded on: {device}")
+
+print(f" Model successfully loaded on: {device}")
 
 # ----------------------------
-# ✅ Function to Process Input Text
+# Function to Query the Model
 # ----------------------------
 
-def split_text(text):
-    """Splits text into sentences (first by newline, then by periods)."""
-    if pd.isna(text): return []
+def query_text(text):
+    """Asks the model if the input text mentions someone calling to withdraw."""
+    prompt = f"""You are an AI assistant. Read the following text and answer:
+    
+    TEXT: "{text}"
 
-    sentences = []
-    for part in text.split("\n"):  # Split on newline first
-        sentences.extend(re.split(r'\.\s*', part))  # Then split by periods
+    QUESTION: Does this text mention someone calling to withdraw something? Answer Yes or No."""
 
-    sentences = [s.strip() for s in sentences if len(s.strip()) > 5]  # Remove empty/short fragments
-    return sentences
+    inputs = tokenizer(prompt, return_tensors="pt").to(device)
 
-# ----------------------------
-# ✅ Function to Compute Sentence Similarity
-# ----------------------------
+    with torch.no_grad():
+        output = model.generate(**inputs, max_new_tokens=10)
 
-reference_queries = [
-    "Person called to withdraw the request.",
-    "Owner requested withdrawal of the request.",
-    "Entity asked to cancel the process.",
-    "Applicant requested to stop the request."
-]
+    response = tokenizer.decode(output[0], skip_special_tokens=True)
+    return response
 
-# ✅ Precompute Reference Query Embeddings
-query_embeddings = {query: model(**tokenizer(query, return_tensors="pt").to(device)).last_hidden_state.mean(dim=1) 
-                    for query in reference_queries}
+#  Example Input Text
+input_text = "The customer called and requested to withdraw their request."
 
-def find_max_similarity(sentences):
-    """Finds the sentence with the highest similarity to reference queries."""
-    max_similarity = 0
-    best_sentence = ""
-    best_query = ""
-
-    for sentence in sentences:
-        inputs = tokenizer(sentence, return_tensors="pt").to(device)
-        sentence_embedding = model(**inputs).last_hidden_state.mean(dim=1)
-
-        for query, query_embedding in query_embeddings.items():
-            similarity_score = torch.cosine_similarity(query_embedding, sentence_embedding).item()
-
-            if similarity_score > max_similarity:
-                max_similarity = similarity_score
-                best_sentence = sentence
-                best_query = query  # Store best-matching reference query
-
-    return max_similarity, best_sentence, best_query
-
-# ----------------------------
-# ✅ Load Data & Process
-# ----------------------------
-
-df = pd.read_csv("data.csv")  # Load input text data (Adjust path if needed)
-
-df["sentences"] = df["text"].apply(split_text)  # Process text into sentences
-df[["max_similarity", "best_sentence", "best_query"]] = df["sentences"].apply(
-    lambda x: find_max_similarity(x) if x else (0, "", "")
-)
-
-# ✅ Compute Optimal Threshold Based on Data Distribution
-threshold = max(0.85, df["max_similarity"].quantile(0.90))  # Use 90th percentile
-print(f"🔹 Suggested Optimal Threshold: {threshold:.2f}")
-
-# ✅ Flag Entries Above Threshold
-df["flagged"] = df["max_similarity"] >= threshold
-
-# ✅ Save Results
-df.to_csv("flagged_text.csv", index=False)
-
-# ✅ Display Flagged Entries
-import ace_tools as tools
-tools.display_dataframe_to_user(name="Flagged Text Entries", dataframe=df[df["flagged"]])
+#  Query Model
+result = query_text(input_text)
+print("Model Response:", result)
