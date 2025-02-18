@@ -1,44 +1,17 @@
-import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
+import pandas as pd
+from tqdm import tqdm
 
-# Define Model Path (Ensure the downloaded files are inside this folder)
-model_path = "phi-1.5"  # Adjust if stored elsewhere
+# ✅ Load dataset
+df = pd.read_csv("data.csv")  # Ensure your file has a "text" column
 
-# Load Tokenizer
-tokenizer = AutoTokenizer.from_pretrained(model_path)
+# ✅ Enable tqdm progress bar
+tqdm.pandas()
 
-# Load Model with `safetensors`
-model = AutoModelForCausalLM.from_pretrained(model_path, torch_dtype=torch.float16, device_map="auto")
+# ✅ Apply function to all text entries
+df["model_response"] = df["text"].progress_apply(query_text)
 
-# Move Model to GPU if available
-device = "cuda" if torch.cuda.is_available() else "cpu"
-model.to(device)
+# ✅ Save results
+df.to_csv("processed_text.csv", index=False)
 
-print(f" Model successfully loaded on: {device}")
-
-# ----------------------------
-# Function to Query the Model
-# ----------------------------
-
-def query_text(text):
-    """Asks the model if the input text mentions someone calling to withdraw."""
-    prompt = f"""You are an AI assistant. Read the following text and answer:
-    
-    TEXT: "{text}"
-
-    QUESTION: Does this text mention someone calling to withdraw something? Answer Yes or No."""
-
-    inputs = tokenizer(prompt, return_tensors="pt").to(device)
-
-    with torch.no_grad():
-        output = model.generate(**inputs, max_new_tokens=10)
-
-    response = tokenizer.decode(output[0], skip_special_tokens=True)
-    return response
-
-#  Example Input Text
-input_text = "The customer called and requested to withdraw their request."
-
-#  Query Model
-result = query_text(input_text)
-print("Model Response:", result)
+# ✅ Display flagged entries
+df[df["model_response"].str.contains("Yes", na=False)]
