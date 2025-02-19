@@ -1,17 +1,75 @@
+import re
+
+def extract_withdraw_sentences(text, context_size=1):
+    """
+    Extracts sentences containing 'withdraw' along with adjoining sentences for context.
+    - context_size: Number of adjacent sentences to include.
+    - Returns a single cleaned-up text for querying LLaMA.
+    """
+    if not isinstance(text, str) or "withdraw" not in text.lower():
+        return ""  # Skip if text is empty or doesn't contain "withdraw"
+
+    sentences = re.split(r'(?<!\w\.\w.)(?<![A-Z][a-z]\.)(?<=\.)\s|\n+', text)
+    
+    withdraw_indices = [i for i, sent in enumerate(sentences) if "withdraw" in sent.lower()]
+    
+    extracted_sentences = []
+    for index in withdraw_indices:
+        start = max(0, index - context_size)  # Ensure index doesn't go negative
+        end = min(len(sentences), index + context_size + 1)
+        extracted_sentences.extend(sentences[start:end])
+    
+    extracted_text = " ".join(set(extracted_sentences)).strip()
+
+    return extracted_text
+
+
+
 import pandas as pd
 from tqdm import tqdm
 
-# ✅ Load dataset
-df = pd.read_csv("data.csv")  # Ensure your file has a "text" column
-
-# ✅ Enable tqdm progress bar
+df = pd.read_csv("/dbfs/data/input_text.csv")  # Update path if needed
 tqdm.pandas()
 
-# ✅ Apply function to all text entries
-df["model_response"] = df["text"].progress_apply(query_text)
+df["extracted_text"] = df["text"].progress_apply(lambda x: extract_withdraw_sentences(x, context_size=1))
 
-# ✅ Save results
-df.to_csv("processed_text.csv", index=False)
+df.to_csv("/dbfs/data/extracted_text.csv", index=False)
 
-# ✅ Display flagged entries
-df[df["model_response"].str.contains("Yes", na=False)]
+df[["text", "extracted_text"]].head(10)
+
+
+
+def query_llama(text):
+    """
+    Queries LLaMA 3.2 3B Instruct to determine if the text explicitly states
+    that the customer called and requested to withdraw.
+    """
+    if not text.strip():
+        return "Unclear"  # Skip empty text
+
+    prompt = f"""You are an AI assistant. Analyze the following text and determine:
+    
+    TEXT: "{text}"
+
+    QUESTION: Did the customer explicitly call and request to withdraw something?
+    Answer only 'Yes' or 'No'.
+    
+    Answer: """
+
+    inputs = tokenizer(prompt, return_tensors="pt").to(device)
+
+    with torch.no_grad():
+        output = model.generate(
+            **inputs,
+            max_new_tokens=3,  
+            temperature=0.1,  
+            do_sample=False,  
+            repetition_penalty=1.5,  
+            eos_token_id=tokenizer.eos_token_id  
+        )
+
+    response = tokenizer.decode(output[0], skip_special_tokens=True).strip()
+
+    return response if response in ["Yes", "No"] else "Unclear"
+
+df["model_response"] = df["extracted_text"].progress_apply(query_llama)
