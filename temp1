@@ -1,75 +1,64 @@
-import re
-
-def extract_withdraw_sentences(text, context_size=1):
-    """
-    Extracts sentences containing 'withdraw' along with adjoining sentences for context.
-    - context_size: Number of adjacent sentences to include.
-    - Returns a single cleaned-up text for querying LLaMA.
-    """
-    if not isinstance(text, str) or "withdraw" not in text.lower():
-        return ""  # Skip if text is empty or doesn't contain "withdraw"
-
-    sentences = re.split(r'(?<!\w\.\w.)(?<![A-Z][a-z]\.)(?<=\.)\s|\n+', text)
-    
-    withdraw_indices = [i for i, sent in enumerate(sentences) if "withdraw" in sent.lower()]
-    
-    extracted_sentences = []
-    for index in withdraw_indices:
-        start = max(0, index - context_size)  # Ensure index doesn't go negative
-        end = min(len(sentences), index + context_size + 1)
-        extracted_sentences.extend(sentences[start:end])
-    
-    extracted_text = " ".join(set(extracted_sentences)).strip()
-
-    return extracted_text
-
-
-
 import pandas as pd
-from tqdm import tqdm
+import re
+import spacy
+import matplotlib.pyplot as plt
 
-df = pd.read_csv("/dbfs/data/input_text.csv")  # Update path if needed
-tqdm.pandas()
+# --- Step 1: Load and Explore the Data ---
+# Adjust the file path as needed.
+csv_path = "path/to/your_file.csv"
+df = pd.read_csv(csv_path)
 
-df["extracted_text"] = df["text"].progress_apply(lambda x: extract_withdraw_sentences(x, context_size=1))
+# Basic exploration
+print("Data Shape:", df.shape)
+print("Columns:", df.columns.tolist())
+print("First 5 rows:")
+print(df.head())
+print("\nData info:")
+print(df.info())
 
-df.to_csv("/dbfs/data/extracted_text.csv", index=False)
+# --- Step 2: Preprocess and Clean the Text ---
+# Fill missing text values, convert to lowercase, and remove extra whitespace.
+df['text_clean'] = df['text'].fillna("").apply(lambda x: re.sub(r'\s+', ' ', x.lower()).strip())
 
-df[["text", "extracted_text"]].head(10)
+# Optionally, examine the distribution of text lengths
+df['text_length'] = df['text_clean'].apply(len)
+print("\nText Length Statistics:")
+print(df['text_length'].describe())
 
+# Plot a histogram of text lengths (using a sample for performance reasons)
+sample_df = df.sample(n=100000, random_state=42)  # adjust sample size as needed
+plt.hist(sample_df['text_length'], bins=50, color='skyblue', edgecolor='black')
+plt.title("Distribution of Text Lengths")
+plt.xlabel("Text Length (characters)")
+plt.ylabel("Frequency")
+plt.show()
 
+# --- Step 3: Sentence Segmentation ---
+# Load spaCy English model (you may need to download it first with: python -m spacy download en_core_web_sm)
+nlp = spacy.load("en_core_web_sm")
 
-def query_llama(text):
-    """
-    Queries LLaMA 3.2 3B Instruct to determine if the text explicitly states
-    that the customer called and requested to withdraw.
-    """
-    if not text.strip():
-        return "Unclear"  # Skip empty text
+def split_into_sentences(text):
+    """Splits text into sentences using spaCy."""
+    doc = nlp(text)
+    return [sent.text.strip() for sent in doc.sents]
 
-    prompt = f"""You are an AI assistant. Analyze the following text and determine:
-    
-    TEXT: "{text}"
+# Apply sentence segmentation; this creates a new column with a list of sentences.
+df['sentences'] = df['text_clean'].apply(split_into_sentences)
 
-    QUESTION: Did the customer explicitly call and request to withdraw something?
-    Answer only 'Yes' or 'No'.
-    
-    Answer: """
+# For a quick check, print the sentences from the first few rows.
+for idx, row in df.head(5).iterrows():
+    print(f"\nID: {row['id']}")
+    print("Sentences:")
+    for sent in row['sentences']:
+        print(f" - {sent}")
 
-    inputs = tokenizer(prompt, return_tensors="pt").to(device)
+# --- Step 4: Basic Keyword Frequency Analysis ---
+keywords = ["called", "requested", "withdraw", "close"]
+for keyword in keywords:
+    col_name = f'contains_{keyword}'
+    df[col_name] = df['text_clean'].apply(lambda x: keyword in x)
+    count = df[col_name].sum()
+    print(f"\nKeyword '{keyword}' frequency: {count}")
 
-    with torch.no_grad():
-        output = model.generate(
-            **inputs,
-            max_new_tokens=3,  
-            temperature=0.1,  
-            do_sample=False,  
-            repetition_penalty=1.5,  
-            eos_token_id=tokenizer.eos_token_id  
-        )
-
-    response = tokenizer.decode(output[0], skip_special_tokens=True).strip()
-
-    return response if response in ["Yes", "No"] else "Unclear"
-
-df["model_response"] = df["extracted_text"].progress_apply(query_llama)
+# Optional: Save the processed DataFrame for later steps.
+df.to_csv("processed_data.csv", index=False)
