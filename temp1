@@ -1,1 +1,47 @@
 
+def classify_call_note_with_llama(text):
+    """
+    Uses the Llama model to classify a call note.
+    It asks whether the note indicates that the customer actively requested
+    to withdraw or close their claim, and if 'Yes', to extract the supporting sentence.
+    The function strips out the repeated prompt portion from the generated output.
+    """
+    # Construct the prompt
+    prompt = (
+        "Does the following customer call note indicate that the customer actively requested "
+        "to withdraw or close their claim? Answer 'Yes' or 'No'. If 'Yes', also extract the sentence "
+        "that best supports this decision.\n\n"
+        "Call Note: \"\"\"\n" + text + "\n\"\"\"\n\nAnswer:"
+    )
+    
+    # Generate output from the model (using max_new_tokens to control output length)
+    full_output = llama_pipeline(prompt, max_new_tokens=150, do_sample=False)[0]['generated_text']
+    
+    # Remove the prompt portion if it is repeated in the output
+    if full_output.startswith(prompt):
+        answer_text = full_output[len(prompt):].strip()
+    else:
+        answer_text = full_output.strip()
+    
+    # Now, parse the answer text.
+    # Assuming the answer starts with "Yes" (or "No") optionally followed by a colon and the relevant sentence.
+    if answer_text.lower().startswith("yes"):
+        decision = "Yes"
+        # Try to split on the first colon to extract the supporting sentence.
+        parts = answer_text.split(":", 1)
+        relevant_sentence = parts[1].strip() if len(parts) > 1 else ""
+    else:
+        decision = "No"
+        relevant_sentence = ""
+    
+    # Confidence is not directly provided; you can later add a heuristic if needed.
+    confidence = None
+    
+    return decision, relevant_sentence, confidence, full_output
+
+# Example usage:
+sample_text = "Your sample customer call note goes here..."
+decision, extracted_sentence, confidence, full_output = classify_call_note_with_llama(sample_text)
+print("Decision:", decision)
+print("Extracted Sentence:", extracted_sentence)
+print("Full Model Output:", full_output)
