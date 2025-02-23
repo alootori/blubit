@@ -1,46 +1,58 @@
+import re
+import string
+
 def classify_call_note_with_llama(text):
     """
     Uses the Llama model to classify a call note.
-    It asks whether the note indicates that the customer actively requested
-    to withdraw or close their claim, and if 'Yes', to extract the supporting sentence.
-    The function strips out the repeated prompt portion from the generated output.
+    The prompt instructs the model to respond in a strict format:
+      Yes|||<one-sentence explanation>
+    or simply:
+      No
+    This function removes any repeated prompt and robustly parses the answer,
+    stripping punctuation from the first token to decide.
     """
-    # Construct the prompt
     prompt = (
-        "Does the following customer call note indicate that the customer actively requested "
-        "to withdraw or close their claim? Answer 'Yes' or 'No'. If 'Yes', also extract the sentence "
-        "that best supports this decision.\n\n"
-        "Call Note: \"\"\"\n" + text + "\n\"\"\"\n\nAnswer:"
+        "Please classify the following customer call note. "
+        "If the customer actively requested to withdraw or close their claim, "
+        "reply EXACTLY in the following format (with no additional text):\n"
+        "Yes|||<one-sentence explanation>\n"
+        "If not, simply reply with:\n"
+        "No\n\n"
+        "Call Note:\n\"\"\"\n" + text + "\n\"\"\"\n\nAnswer:"
     )
     
-    # Generate output from the model (using max_new_tokens to control output length)
-    full_output = llama_pipeline(prompt, max_new_tokens=150, do_sample=False)[0]['generated_text']
+    # Generate output from the model with a controlled number of new tokens.
+    full_output = llama_pipeline(prompt, max_new_tokens=100, do_sample=False)[0]['generated_text']
     
-    # Remove the prompt portion if it is repeated in the output
+    # Remove the prompt portion if it is repeated in the output.
     if full_output.startswith(prompt):
         answer_text = full_output[len(prompt):].strip()
     else:
         answer_text = full_output.strip()
     
-    # Now, parse the answer text.
-    # Assuming the answer starts with "Yes" (or "No") optionally followed by a colon and the relevant sentence.
-    if answer_text.lower().startswith("yes"):
-        decision = "Yes"
-        # Try to split on the first colon to extract the supporting sentence.
-        parts = answer_text.split(":", 1)
-        relevant_sentence = parts[1].strip() if len(parts) > 1 else ""
+    # Debug print (optional)
+    # print("Raw Answer Text:", answer_text)
+    
+    # Check if the output contains our delimiter.
+    if "|||" in answer_text:
+        parts = answer_text.split("|||", 1)
+        raw_decision = parts[0].strip()
+        explanation = parts[1].strip()
     else:
-        decision = "No"
-        relevant_sentence = ""
+        # Fallback: take the first word as the decision.
+        tokens = answer_text.split()
+        raw_decision = tokens[0] if tokens else ""
+        explanation = ""
     
-    # Confidence is not directly provided; you can later add a heuristic if needed.
-    confidence = None
+    # Remove punctuation and extra spaces from the decision token.
+    decision_token = raw_decision.strip(string.punctuation + " ").lower()
+    decision = "Yes" if decision_token.startswith("yes") else "No"
     
-    return decision, relevant_sentence, confidence, full_output
+    return decision, explanation, full_output
 
 # Example usage:
-sample_text = "Your sample customer call note goes here..."
-decision, extracted_sentence, confidence, full_output = classify_call_note_with_llama(sample_text)
+sample_text = "The customer called and clearly requested to withdraw their claim immediately."
+decision, explanation, full_output = classify_call_note_with_llama(sample_text)
 print("Decision:", decision)
-print("Extracted Sentence:", extracted_sentence)
+print("Explanation:", explanation)
 print("Full Model Output:", full_output)
