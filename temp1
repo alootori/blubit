@@ -1,10 +1,118 @@
-You are a customer service classification expert. Read the call note below and internally think through whether the customer actively requested to withdraw or close their claim. After your reasoning, output only the final answer in exactly two lines:
-Line 1: "Yes" or "No"
-Line 2: A one-sentence explanation if the answer is "Yes"; if "No", output "N/A".
+import re
+import pandas as pd
+from tqdm import tqdm
+from transformers import pipeline
 
+# --- 1. Set Up the Llama Pipeline with Automatic Device Allocation ---
+llama_pipeline = pipeline(
+    "text-generation",
+    model="meta-llama/Llama-3-3b-instruct",
+    device_map="auto"  # Automatically uses GPU if available
+)
+
+# --- 2. Define a Function to Create the Strict Prompt ---
+def create_prompt(text):
+    """
+    Builds a prompt in [INST] format that instructs the model to output exactly
+    'Yes' or 'No' (and nothing else) to classify whether the customer call note
+    indicates that the customer actively requested to withdraw or close their claim.
+    """
+    prompt = f"""[INST] <<SYS>>
+You are a helpful assistant. Respond strictly with only 'Yes' or 'No'. Do not include any additional text.
+<</SYS>>
+
+User: Does the following customer call note indicate that the customer actively requested to withdraw or close their claim?
 Call Note:
-"""
-[CALL NOTE TEXT HERE]
-"""
+\"\"\"
+{text}
+\"\"\"
+Assistant: [/INST]"""
+    return prompt
 
-Final Answer:
+# --- 3. Function to Call the Llama Model and Parse Its Response ---
+def classify_text_llama(text, max_new_tokens=5):
+    """
+    Generates a classification for the given text using the Llama model.
+    The output should be strictly 'Yes' or 'No' (with possible extra spaces/newlines).
+    """
+    prompt = create_prompt(text)
+    output = llama_pipeline(
+        prompt, 
+        max_new_tokens=max_new_tokens, 
+        do_sample=False, 
+        temperature=0, 
+        return_full_text=False
+    )[0]['generated_text']
+    
+    # The output should be just "Yes" or "No", but we clean it up:
+    answer = output.strip().split()[0]  # take the first token
+    decision = "Yes" if answer.lower().startswith("yes") else "No"
+    return decision, output
+
+# --- 4. Function to Split Long Texts into Chunks ---
+def split_text_into_chunks(text, max_chunk_size=2000):
+    """
+    Splits a long text into chunks of roughly max_chunk_size characters,
+    trying to preserve sentence boundaries.
+    """
+    pattern = re.compile(r'(?<=[.!?])\s+')
+    sentences = pattern.split(text.strip())
+    chunks = []
+    current_chunk = ""
+    for sentence in sentences:
+        if len(current_chunk) + len(sentence) + 1 <= max_chunk_size:
+            current_chunk = f"{current_chunk} {sentence}".strip() if current_chunk else sentence
+        else:
+            chunks.append(current_chunk)
+            current_chunk = sentence
+    if current_chunk:
+        chunks.append(current_chunk)
+    return chunks
+
+# --- 5. Function to Process a Single Call Note ---
+def process_call_note(text, max_chunk_size=2000):
+    """
+    Processes a call note. If the note exceeds max_chunk_size, it is split into chunks.
+    The function returns "Yes" if any chunk is classified as "Yes"; otherwise "No".
+    Also returns the combined model outputs (for logging if needed).
+    """
+    if len(text) <= max_chunk_size:
+        decision, output = classify_text_llama(text)
+        return decision, output
+    else:
+        chunks = split_text_into_chunks(text, max_chunk_size)
+        overall_decision = "No"
+        combined_output = ""
+        for chunk in chunks:
+            decision, output = classify_text_llama(chunk)
+            combined_output += f"\nChunk output: {output}"
+            if decision == "Yes":
+                overall_decision = "Yes"
+                break  # stop at the first positive classification
+        return overall_decision, combined_output
+
+# --- 6. Function to Process the Entire DataFrame ---
+def process_dataframe(df, text_col="text", max_chunk_size=2000):
+    """
+    Applies the call note processing function to every row in the DataFrame.
+    New columns added:
+      - 'llama_decision': "Yes" or "No"
+      - 'llama_output': Raw model output(s) for inspection/logging
+    """
+    decisions = []
+    outputs = []
+    
+    for text in tqdm(df[text_col], desc="Processing rows"):
+        decision, output = process_call_note(text, max_chunk_size)
+        decisions.append(decision)
+        outputs.append(output)
+    
+    df["llama_decision"] = decisions
+    df["llama_output"] = outputs
+    return df
+
+# --- 7. Main Code: Load CSV, Process, and Save Results ---
+# Replace 'your_file.csv' with your CSV file's path.
+df = pd.read_csv("your_file.csv")
+processed_df = process_dataframe(df, text_col="text", max_chunk_size=2000)
+processed_df.to_csv("df_with_llama_results.csv", index=False)
