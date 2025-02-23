@@ -1,4 +1,3 @@
-
 def classify_call_note_with_llama(text):
     """
     Uses the Llama model to classify a call note.
