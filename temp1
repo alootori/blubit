@@ -1,10 +1,42 @@
-prompt = f"""[INST] <<SYS>>
-You are a customer service classification expert. Carefully analyze the following customer call note. First, explain in one or two sentences your reasoning about whether the customer actively requested to withdraw or close their claim. Then, on a new line, provide your final decision strictly as "Final Answer: Yes" or "Final Answer: No". Do not include any additional text.
-<</SYS>>
+import re
+import pandas as pd
+import matplotlib.pyplot as plt
+from collections import Counter
+from wordcloud import WordCloud
 
-User: Analyze the following call note.
-Call Note:
-\"\"\"
-{text}
-\"\"\"
-Assistant: [/INST]"""
+# Sample DataFrame (Replace this with your actual Databricks DataFrame)
+data = {'text': ['This is an {example} text with {curly} brackets',
+                 'Another {test} string with {multiple} words inside {brackets}',
+                 '{Databricks} is great for {big} data',
+                 '{example} is repeated {example} multiple times']}
+
+df = pd.DataFrame(data)
+
+# Function to extract words within curly brackets
+def extract_curly_text(text):
+    return re.findall(r'\{(.*?)\}', text)
+
+# Apply function to extract words from each row
+df['extracted_words'] = df['text'].apply(lambda x: extract_curly_text(x))
+
+# Flatten list of words and convert to lowercase
+all_words = [word.lower() for sublist in df['extracted_words'] for word in sublist]
+
+# Word Frequency Count
+word_counts = Counter(all_words)
+
+# Convert to DataFrame for analysis
+word_count_df = pd.DataFrame(word_counts.items(), columns=['Word', 'Count'])
+
+# Display word count table
+import ace_tools as tools
+tools.display_dataframe_to_user(name="Word Count Analysis", dataframe=word_count_df)
+
+# Generate WordCloud
+wordcloud = WordCloud(width=800, height=400, background_color='white').generate_from_frequencies(word_counts)
+
+# Plot WordCloud
+plt.figure(figsize=(10, 5))
+plt.imshow(wordcloud, interpolation='bilinear')
+plt.axis('off')
+plt.show()
