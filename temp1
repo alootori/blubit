@@ -1,42 +1,37 @@
-import re
 import pandas as pd
-import matplotlib.pyplot as plt
-from collections import Counter
-from wordcloud import WordCloud
+import re
 
-# Sample DataFrame (Replace this with your actual Databricks DataFrame)
-data = {'text': ['This is an {example} text with {curly} brackets',
-                 'Another {test} string with {multiple} words inside {brackets}',
-                 '{Databricks} is great for {big} data',
-                 '{example} is repeated {example} multiple times']}
+# Sample DataFrame
+data = {'text': [
+    "I want to cancel my subscription.\n\nThe claim process was unclear.\n\nCan you help?",
+    "I wish to withdraw my application.\n\nThere is a delay in my claim processing.",
+    "Just a general inquiry.\n\nNo actions needed at this time.",
+    "Please terminate my account.\n\nMy claim was rejected.\n\nThis is frustrating!"
+]}
 
 df = pd.DataFrame(data)
 
-# Function to extract words within curly brackets
-def extract_curly_text(text):
-    return re.findall(r'\{(.*?)\}', text)
+# Function to extract relevant sentences
+def extract_relevant_sentences(text):
+    # Split text into sentences by newlines, handling multiple consecutive newlines
+    sentences = re.split(r'\n+', text.strip())
 
-# Apply function to extract words from each row
-df['extracted_words'] = df['text'].apply(lambda x: extract_curly_text(x))
+    # Define keyword sets
+    keywords1 = r'cancel|close|terminate|withdraw'
+    keywords2 = r'claim'
 
-# Flatten list of words and convert to lowercase
-all_words = [word.lower() for sublist in df['extracted_words'] for word in sublist]
+    # Filter sentences that contain both sets of keywords
+    relevant_sentences = [s for s in sentences if re.search(keywords1, s, re.IGNORECASE) and re.search(keywords2, s, re.IGNORECASE)]
 
-# Word Frequency Count
-word_counts = Counter(all_words)
+    # Join them back as a single string (or keep as a list if needed)
+    return "\n".join(relevant_sentences) if relevant_sentences else None
 
-# Convert to DataFrame for analysis
-word_count_df = pd.DataFrame(word_counts.items(), columns=['Word', 'Count'])
+# Apply function to create a new column
+df['extracted_sentences'] = df['text'].apply(extract_relevant_sentences)
 
-# Display word count table
+# Filter rows where relevant sentences were found
+filtered_df = df.dropna(subset=['extracted_sentences'])
+
+# Display the results
 import ace_tools as tools
-tools.display_dataframe_to_user(name="Word Count Analysis", dataframe=word_count_df)
-
-# Generate WordCloud
-wordcloud = WordCloud(width=800, height=400, background_color='white').generate_from_frequencies(word_counts)
-
-# Plot WordCloud
-plt.figure(figsize=(10, 5))
-plt.imshow(wordcloud, interpolation='bilinear')
-plt.axis('off')
-plt.show()
+tools.display_dataframe_to_user(name="Filtered DataFrame", dataframe=filtered_df)
