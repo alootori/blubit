@@ -1,54 +1,14 @@
-import pandas as pd
-import re
+from transformers import pipeline, AutoTokenizer
 
-# Sample DataFrame
-data = {'text': [
-    "I wanna canc my subscription.\n\nThe claime process was unclear.\n\nCan you help?",
-    "I wish to witdraw my application.\n\nThere is a delay in my clm processing.",
-    "Just a general inquiry.\n\nNo actions needed at this time.",
-    "Please withdarw my account.\n\nMy clm was rejected.\n\nThis is frustrating!",
-    "I will continue my subscription.\n\nCxl is not an option for me.\n\nI made a claim yesterday."
-]}
+# Load the tokenizer and explicitly set the pad token to be the eos token
+tokenizer = AutoTokenizer.from_pretrained("meta-llama/Llama-3-3b-instruct")
+tokenizer.pad_token = tokenizer.eos_token
 
-df = pd.DataFrame(data)
-
-# Function to extract relevant sentences along with their neighboring sentences
-def extract_with_context(text):
-    # Split text into sentences, handling multiple newlines
-    sentences = re.split(r'\n+', text.strip())
-
-    # Expanded keyword sets
-    cancel_variants = r'canc|cxl|cncl|cance|cancell'
-    close_variants = r'clos|cls'
-    withdraw_variants = r'witdraw|withdarw|wthdraw|withdrw|withdaw|widhraw|wthdarw|withd|wthd|wd'
-    
-    keywords1 = rf'({cancel_variants}|{close_variants}|{withdraw_variants})'
-    keywords2 = r'clm|claim|claime|clam'  # Claim variations
-
-    # Find indices of matching sentences
-    match_indices = [i for i, s in enumerate(sentences) if re.search(keywords1, s, re.IGNORECASE) and re.search(keywords2, s, re.IGNORECASE)]
-
-    # Collect sentences with context (previous and next sentence if available)
-    extracted_sentences = []
-    for i in match_indices:
-        context = []
-        if i > 0:  # Include previous sentence if it exists
-            context.append(sentences[i - 1])
-        context.append(sentences[i])  # Include matching sentence
-        if i < len(sentences) - 1:  # Include next sentence if it exists
-            context.append(sentences[i + 1])
-
-        extracted_sentences.append("\n".join(context))
-
-    # Return joined sentences or None if no match
-    return "\n\n".join(extracted_sentences) if extracted_sentences else None
-
-# Apply function to create a new column
-df['extracted_sentences_with_context'] = df['text'].apply(extract_with_context)
-
-# Filter rows where relevant sentences were found
-filtered_df = df.dropna(subset=['extracted_sentences_with_context'])
-
-# Display the results
-import ace_tools as tools
-tools.display_dataframe_to_user(name="Filtered DataFrame with Context and Enhanced Variations", dataframe=filtered_df)
+# Set up the pipeline with the explicit pad_token_id parameter
+llama_pipeline = pipeline(
+    "text-generation",
+    model="meta-llama/Llama-3-3b-instruct",
+    tokenizer=tokenizer,
+    device_map="auto",  # Automatically allocates model to GPU if available
+    pad_token_id=tokenizer.eos_token_id
+)
