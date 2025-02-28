@@ -6,32 +6,45 @@ data = {'text': [
     "I want to cancel my subscription.\n\nThe claim process was unclear.\n\nCan you help?",
     "I wish to withdraw my application.\n\nThere is a delay in my claim processing.",
     "Just a general inquiry.\n\nNo actions needed at this time.",
-    "Please terminate my account.\n\nMy claim was rejected.\n\nThis is frustrating!"
+    "Please terminate my account.\n\nMy claim was rejected.\n\nThis is frustrating!",
+    "I will continue my subscription.\n\nCanceling is not an option for me.\n\nI made a claim yesterday."
 ]}
 
 df = pd.DataFrame(data)
 
-# Function to extract relevant sentences
-def extract_relevant_sentences(text):
-    # Split text into sentences by newlines, handling multiple consecutive newlines
+# Function to extract relevant sentences along with their neighboring sentences
+def extract_with_context(text):
+    # Split text into sentences, handling multiple newlines
     sentences = re.split(r'\n+', text.strip())
 
     # Define keyword sets
     keywords1 = r'cancel|close|terminate|withdraw'
     keywords2 = r'claim'
 
-    # Filter sentences that contain both sets of keywords
-    relevant_sentences = [s for s in sentences if re.search(keywords1, s, re.IGNORECASE) and re.search(keywords2, s, re.IGNORECASE)]
+    # Find indices of matching sentences
+    match_indices = [i for i, s in enumerate(sentences) if re.search(keywords1, s, re.IGNORECASE) and re.search(keywords2, s, re.IGNORECASE)]
 
-    # Join them back as a single string (or keep as a list if needed)
-    return "\n".join(relevant_sentences) if relevant_sentences else None
+    # Collect sentences with context (previous and next sentence if available)
+    extracted_sentences = []
+    for i in match_indices:
+        context = []
+        if i > 0:  # Include previous sentence if it exists
+            context.append(sentences[i - 1])
+        context.append(sentences[i])  # Include matching sentence
+        if i < len(sentences) - 1:  # Include next sentence if it exists
+            context.append(sentences[i + 1])
+
+        extracted_sentences.append("\n".join(context))
+
+    # Return joined sentences or None if no match
+    return "\n\n".join(extracted_sentences) if extracted_sentences else None
 
 # Apply function to create a new column
-df['extracted_sentences'] = df['text'].apply(extract_relevant_sentences)
+df['extracted_sentences_with_context'] = df['text'].apply(extract_with_context)
 
 # Filter rows where relevant sentences were found
-filtered_df = df.dropna(subset=['extracted_sentences'])
+filtered_df = df.dropna(subset=['extracted_sentences_with_context'])
 
 # Display the results
 import ace_tools as tools
-tools.display_dataframe_to_user(name="Filtered DataFrame", dataframe=filtered_df)
+tools.display_dataframe_to_user(name="Filtered DataFrame with Context", dataframe=filtered_df)
