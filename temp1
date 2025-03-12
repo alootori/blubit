@@ -1,13 +1,1 @@
-Hi K,
-
-B and I discussed the Point-in-Time Date issue and identified a few key challenges:
-
-Frequent Estimate Changes – Estimates are added and removed multiple times within a single day. For example, refer to the screenshot below for the numbers.
-Timing of Aged Claims Referrals – It is more appropriate to check only the Point-in-Time Date when we receive aged claims referrals.
-Given these considerations, we decided to use the ‘Estimate Removal Flag’ from the created Redshift table as our direct target variable for positive and negative classes.
-
-We already have 23K data points, which we believe is sufficient for modeling. I have proceeded with EDA and modeling, and we can discuss the details in our catch-up call tomorrow.
-
-Let me know if you have any questions.
-
-Thanks,
+blank
