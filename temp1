@@ -1,1 +1,116 @@
-BLANK
+# Full XGBoost Classification Pipeline with Interpretation
+
+# Imports
+import pandas as pd
+import numpy as np
+from sklearn.model_selection import train_test_split, GridSearchCV
+from sklearn.pipeline import Pipeline
+from sklearn.compose import ColumnTransformer
+from sklearn.preprocessing import StandardScaler, OneHotEncoder
+from sklearn.metrics import classification_report, roc_auc_score, roc_curve, confusion_matrix
+import xgboost as xgb
+import shap
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+# Load your DataFrame
+# df = pd.read_csv('your_data.csv')  # replace with your actual dataset
+
+# Example of column types (replace with your actual columns)
+target_col = 'target'
+id_cols = ['id', 'hash']
+date_cols = ['date1', 'date2']
+flag_cols = ['flag1', 'flag2']
+categorical_cols = ['cat1', 'cat2']
+numerical_cols = ['num1', 'num2']
+
+# Drop irrelevant ID columns
+df.drop(columns=id_cols, inplace=True)
+
+# Date feature engineering (extracting simple date features)
+for date_col in date_cols:
+    df[date_col] = pd.to_datetime(df[date_col])
+    df[f'{date_col}_year'] = df[date_col].dt.year
+    df[f'{date_col}_month'] = df[date_col].dt.month
+    df[f'{date_col}_day'] = df[date_col].dt.day
+    df.drop(columns=date_col, inplace=True)
+
+# Update numerical columns with date-extracted numeric columns
+numerical_cols.extend([f'{col}_{period}' for col in date_cols for period in ['year', 'month', 'day']])
+
+# Split data into X and y
+X = df.drop(target_col, axis=1)
+y = df[target_col]
+
+# Train-test split
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, 
+                                                    random_state=42, stratify=y)
+
+# Preprocessing
+preprocessor = ColumnTransformer(transformers=[
+    ('num', StandardScaler(), numerical_cols),
+    ('cat', OneHotEncoder(handle_unknown='ignore'), categorical_cols),
+    ('flag', 'passthrough', flag_cols)
+])
+
+# XGBoost model pipeline
+pipeline = Pipeline(steps=[
+    ('preprocessor', preprocessor),
+    ('classifier', xgb.XGBClassifier(use_label_encoder=False, eval_metric='logloss', random_state=42))
+])
+
+# Hyperparameter tuning (simplified grid)
+param_grid = {
+    'classifier__n_estimators': [100, 200],
+    'classifier__max_depth': [4, 6],
+    'classifier__learning_rate': [0.01, 0.1]
+}
+
+grid_search = GridSearchCV(pipeline, param_grid, cv=5, scoring='roc_auc', verbose=2)
+grid_search.fit(X_train, y_train)
+
+# Best model
+best_model = grid_search.best_estimator_
+print("Best Parameters:", grid_search.best_params_)
+
+# Predictions
+y_pred = best_model.predict(X_test)
+y_proba = best_model.predict_proba(X_test)[:, 1]
+
+# Evaluation
+print("\nClassification Report:\n", classification_report(y_test, y_pred))
+print("ROC AUC Score:", roc_auc_score(y_test, y_proba))
+
+# Confusion Matrix
+cm = confusion_matrix(y_test, y_pred)
+sns.heatmap(cm, annot=True, fmt='d', cmap='Blues')
+plt.title('Confusion Matrix')
+plt.xlabel('Predicted Label')
+plt.ylabel('True Label')
+plt.show()
+
+# ROC Curve
+fpr, tpr, thresholds = roc_curve(y_test, y_proba)
+plt.figure()
+plt.plot(fpr, tpr, label=f'AUC = {roc_auc_score(y_test, y_proba):.2f}')
+plt.plot([0, 1], [0, 1], linestyle='--')
+plt.xlabel('False Positive Rate')
+plt.ylabel('True Positive Rate')
+plt.title('ROC Curve')
+plt.legend()
+plt.show()
+
+# Feature Importance
+classifier = best_model.named_steps['classifier']
+xgb.plot_importance(classifier, max_num_features=20)
+plt.title('XGBoost Feature Importance')
+plt.show()
+
+# SHAP Interpretation
+explainer = shap.TreeExplainer(classifier)
+X_test_transformed = best_model.named_steps['preprocessor'].transform(X_test)
+shap_values = explainer.shap_values(X_test_transformed)
+
+shap.summary_plot(shap_values, features=X_test_transformed, 
+                  feature_names=best_model.named_steps['preprocessor'].get_feature_names_out(),
+                  plot_type='bar')
